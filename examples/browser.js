@@ -6,9 +6,9 @@ const sample_query =
   "SELECT name, ST_Area(geom) as val FROM heavyai_counties;"
 const defaultQueryOptions = {}
 const defaultConnection = {
-  hostname: "localhost",
+  hostname: "192.168.86.31",
   useHTTPS: true,
-  port: "6278",
+  port: "3030",
   database: "heavyai",
   username: "admin",
   password: "HyperInteractive"
@@ -73,7 +73,7 @@ function tryConnect(connectionOpts) {
       populateQuery(sample_query)
       populateTables()
     })
-    .catch((err) => alert(err.error_msg))
+    .catch((err) => alert(err))
 }
 
 function executeQuery(query) {
@@ -87,7 +87,9 @@ function executeQuery(query) {
       }
     })
     .then((results) => {
+      console.log(query)
       console.log(results)
+      console.log('results')
       populateResultsTable(results)
     })
 }
