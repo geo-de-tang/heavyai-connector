@@ -1,10 +1,10 @@
 {
-  "name": "@heavyai/connector",
+  "name": "@geo.de.tang/heavyai-connector",
   "description": "Connector to heavydb",
-  "version": "7.0.0",
+  "version": "0.0.14",
   "license": "Apache-2.0",
   "scripts": {
-    "build": "bash scripts/build.sh",
+    "build": "NODE_OPTIONS=\"--openssl-legacy-provider\" bash scripts/build.sh",
     "clean": "rm -rf node_modules/ dist/ docs/",
     "clean:docs": "rm -rf docs/",
     "coverage": "nyc report --reporter=text-lcov",
@@ -24,7 +24,7 @@
   "jsdelivr": "dist/browser-connector.js",
   "repository": {
     "type": "git",
-    "url": "http://github.com/heavyai/heavyai-connector"
+    "url": "https://github.com/geo-de-tang/heavyai-connector"
   },
   "devDependencies": {
     "@babel/cli": "^7.12.1",
