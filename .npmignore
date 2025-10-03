@@ -8,3 +8,9 @@ npm-debug.log
 *-transpiled.js
 coverage/
 .nyc_output/
+.github/
+src/
+scripts/
+thrift/
+test/
+examples/
