@@ -161,9 +161,8 @@ function buildClient(url, useBinaryProtocol) {
       path: "/",
       headers: {
         Connection: "close",
-        "Content-Type": `application/vnd.apache.thrift.${
-          useBinaryProtocol ? "binary" : "json"
-        }`
+        "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
+          }`
       },
       https: protocol === "https:"
     })
@@ -174,9 +173,8 @@ function buildClient(url, useBinaryProtocol) {
       protocol: useBinaryProtocol ? CustomBinaryProtocol : CustomTJSONProtocol,
       path: "/",
       headers: {
-        "Content-Type": `application/vnd.apache.thrift.${
-          useBinaryProtocol ? "binary" : "json"
-        }`
+        "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
+          }`
       },
       https: protocol === "https:"
     })
@@ -235,6 +233,8 @@ export class DbCon {
         .catch((error) => {
           if (this._logging && options.query) {
             // eslint-disable-next-line no-console
+
+            console.error(' this where the error is thrown ')
             console.error(options.query, "\n", error)
           }
           throw error
@@ -287,11 +287,24 @@ export class DbCon {
 
   // ** Method wrappers **
 
-  handleErrors = (method) => (...args) =>
-    method.apply(this, args).catch((error) => {
+  handleErrors = (method) => (...args) => {
+    console.error('this the error handling wrapper')
+    console.log('args', args)
+    console.log('method', method)
+
+    let a;
+
+    try {
+      a = method.apply(this, args)
+    }
+    catch (error) {
       this.events.emit(this.EVENT_NAMES.ERROR, error)
-      throw error
-    })
+      console.error('this the uncaught error')
+
+      a = error.error_msg
+    }
+    return a
+  }
 
   // for backward compatibility
   callbackify = (method, arity) => (...args) => {
@@ -312,48 +325,170 @@ export class DbCon {
 
   // Wrap a Thrift method to perform session check and mapping over
   // all clients (for mutating methods)
+  // Wrap a Thrift method to perform session check and mapping over
+  // all clients (for mutating methods)
   wrapThrift = (methodName, overClients, processArgs) => (...args) => {
-    if (this._sessionId) {
-      const processedArgs = processArgs(args)
-      if (process.env.BROWSER) {
-        this.events.emit(this.EVENT_NAMES.METHOD_CALLED, methodName)
-      }
+    console.log('=== wrapThrift START ===');
+    console.log('methodName:', methodName);
+    console.log('overClients:', overClients);
+    console.log('args received:', args);
+    console.log('sessionId exists:', !!this._sessionId);
+    console.log('sessionId value:', this._sessionId);
 
-      if (overClients === this.overSingleClient) {
-        return new Promise((resolve, reject) => {
-          const requestId = pushid()
-          this.addPendingRequest(0, requestId, { resolve, reject })
-          return this._client[0][methodName]
-            .apply(this._client[0], [this._sessionId[0]].concat(processedArgs))
-            .then((res) => {
-              delete this._pendingRequests[0][requestId]
-              return resolve(res)
-            })
-        })
-      } else {
-        return Promise.all(
-          this._client.map(
-            (client, index) =>
-              new Promise((resolve, reject) => {
-                const requestId = pushid()
-                this.addPendingRequest(index, requestId, { resolve, reject })
-                return client[methodName]
-                  .apply(client, [this._sessionId[index]].concat(processedArgs))
-                  .then((res) => {
-                    delete this._pendingRequests[index][requestId]
-                    return resolve(res)
-                  })
-              })
-          )
-        )
-      }
-    } else {
-      return Promise.reject(
-        new Error(
-          "You are not connected to a server. Try running the connect method first."
-        )
-      )
+    // Check if we have a valid session
+    if (!this._sessionId) {
+      console.error('❌ No session ID - rejecting promise');
+      const error = new Error("You are not connected to a server. Try running the connect method first.");
+      console.error('Rejection error:', error);
+      return Promise.reject(error);
     }
+
+    console.log('✅ Session ID exists, proceeding...');
+
+    // Process the arguments
+    let processedArgs;
+    try {
+      console.log('Processing args with processArgs function...');
+      processedArgs = processArgs(args);
+      console.log('Processed args:', processedArgs);
+    } catch (error) {
+      console.error('❌ Error processing args:', error);
+      return Promise.reject(error);
+    }
+
+    // Emit browser event if needed
+    if (process.env.BROWSER) {
+      console.log('🌐 Browser environment - emitting event');
+      this.events.emit(this.EVENT_NAMES.METHOD_CALLED, methodName);
+    }
+
+    // Handle single client vs all clients
+    if (overClients === this.overSingleClient) {
+      console.log('📡 Using SINGLE CLIENT strategy');
+      return this.executeSingleClient(methodName, processedArgs);
+    } else {
+      console.log('📡 Using ALL CLIENTS strategy');
+      return this.executeAllClients(methodName, processedArgs);
+    }
+  }
+
+  // Extract single client execution logic
+  executeSingleClient = (methodName, processedArgs) => {
+    console.log('=== executeSingleClient START ===');
+    console.log('Client array length:', this._client?.length);
+    console.log('First client exists:', !!this._client?.[0]);
+    console.log('Method exists on client:', !!this._client?.[0]?.[methodName]);
+
+    return new Promise((resolve, reject) => {
+      const requestId = pushid();
+      console.log('Generated request ID:', requestId);
+
+      try {
+        this.addPendingRequest(0, requestId, { resolve, reject });
+        console.log('Added pending request for client 0');
+
+        const client = this._client[0];
+        const sessionId = this._sessionId[0];
+        const finalArgs = [sessionId].concat(processedArgs);
+
+        console.log('Final args for Thrift call:', finalArgs);
+        console.log('Calling client method:', methodName);
+
+        // Make the actual Thrift call
+        const thriftPromise = client[methodName].apply(client, finalArgs);
+        console.log('Thrift promise created:', !!thriftPromise);
+
+        return thriftPromise
+          .then((res) => {
+            console.log('✅ Single client success');
+            console.log('Response type:', typeof res);
+            console.log('Response length (if array):', Array.isArray(res) ? res.length : 'not array');
+
+            // Clean up pending request
+            delete this._pendingRequests[0][requestId];
+            console.log('Cleaned up pending request');
+
+            console.log('=== executeSingleClient END (SUCCESS) ===');
+            return resolve(res);
+          })
+          .catch((error) => {
+            console.error('❌ Single client error');
+            console.error('Error name:', error.name);
+            console.error('Error error_msg:', error.error_msg);
+            console.error('Full error object:', error);
+
+            // Clean up pending request
+            delete this._pendingRequests[0][requestId];
+            console.log('Cleaned up pending request after error');
+
+            console.log('=== executeSingleClient END (ERROR) ===');
+            return reject(error.error_msg);
+          });
+
+      } catch (syncError) {
+        console.error('❌ Synchronous error in executeSingleClient:', syncError);
+        delete this._pendingRequests[0][requestId];
+        reject(syncError);
+      }
+    });
+  }
+
+  // Extract all clients execution logic
+  executeAllClients = (methodName, processedArgs) => {
+    console.log('=== executeAllClients START ===');
+    console.log('Number of clients:', this._client?.length);
+
+    const clientPromises = this._client.map((client, index) => {
+      console.log(`Creating promise for client ${index}`);
+
+      return new Promise((resolve, reject) => {
+        const requestId = pushid();
+        console.log(`Client ${index} request ID:`, requestId);
+
+        try {
+          this.addPendingRequest(index, requestId, { resolve, reject });
+          console.log(`Added pending request for client ${index}`);
+
+          const sessionId = this._sessionId[index];
+          const finalArgs = [sessionId].concat(processedArgs);
+
+          console.log(`Client ${index} final args:`, finalArgs);
+
+          return client[methodName]
+            .apply(client, finalArgs)
+            .then((res) => {
+              console.log(`✅ Client ${index} success`);
+              delete this._pendingRequests[index][requestId];
+              return resolve(res);
+            })
+            .catch((error) => {
+              console.error(`❌ Client ${index} error:`, error);
+              delete this._pendingRequests[index][requestId];
+              return reject(error);
+            });
+
+        } catch (syncError) {
+          console.error(`❌ Synchronous error in client ${index}:`, syncError);
+          delete this._pendingRequests[index][requestId];
+          reject(syncError);
+        }
+      });
+    });
+
+    console.log('Created all client promises, calling Promise.all');
+
+    return Promise.all(clientPromises)
+      .then((results) => {
+        console.log('✅ All clients succeeded');
+        console.log('Results length:', results.length);
+        console.log('=== executeAllClients END (SUCCESS) ===');
+        return results;
+      })
+      .catch((error) => {
+        console.error('❌ One or more clients failed:', error);
+        console.log('=== executeAllClients END (ERROR) ===');
+        throw error;
+      });
   }
 
   xhrWithCredentials(enabled) {
