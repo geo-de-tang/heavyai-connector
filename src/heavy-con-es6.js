@@ -29,6 +29,7 @@ import {
   TJSONProtocol,
   XHRConnection,
   createClient,
+  createConnection,
   createHttpConnection,
   createXHRClient
 } from "thrift"
@@ -151,35 +152,58 @@ function buildClient(url, useBinaryProtocol) {
   if (port === "") {
     port = protocol === "https:" ? "443" : "80"
   }
+  console.log(port)
 
   let client = null
   let connection = null
   if (!process.env.BROWSER) {
-    connection = createHttpConnection(hostname, port, {
-      transport: TBufferedTransport,
-      protocol: useBinaryProtocol ? CustomBinaryProtocol : CustomTJSONProtocol,
-      path: "/",
-      headers: {
-        Connection: "close",
-        "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
-          }`
-      },
-      https: protocol === "https:"
-    })
-    client = createClient(MapDThrift, connection)
+    console.log('not in browser')
+
+    console.log('using ssl');
+    if (protocol !== "http:" && protocol !== "https:") {
+      console.log(hostname, port);
+      connection = createConnection(hostname, port, {
+      })
+      client = createClient(MapDThrift, connection)
+    } else {
+      console.log('using http');
+      console.log('useBinaryProtocol', useBinaryProtocol);
+      connection = createHttpConnection(hostname, port, {
+        transport: TBufferedTransport,
+        protocol: useBinaryProtocol ? CustomBinaryProtocol : CustomTJSONProtocol,
+        path: "/",
+        headers: {
+          Connection: "close",
+          "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
+            }`
+        },
+        https: protocol === "https:"
+      })
+      client = createClient(MapDThrift, connection)
+    }
   } else {
-    connection = new CustomXHRConnection(hostname, port, {
-      transport: TBufferedTransport,
-      protocol: useBinaryProtocol ? CustomBinaryProtocol : CustomTJSONProtocol,
-      path: "/",
-      headers: {
-        "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
-          }`
-      },
-      https: protocol === "https:"
-    })
-    client = createXHRClient(MapDThrift, connection)
+    if (protocol !== "http:" && protocol !== "https:") {
+      console.log(hostname, port);
+      connection = createConnection(hostname, port, {
+      })
+      client = createClient(MapDThrift, connection)
+    } else {
+      connection = new CustomXHRConnection(hostname, port, {
+        transport: TBufferedTransport,
+        protocol: useBinaryProtocol ? CustomBinaryProtocol : CustomTJSONProtocol,
+        path: "/",
+        headers: {
+          "Content-Type": `application/vnd.apache.thrift.${useBinaryProtocol ? "binary" : "json"
+            }`
+        },
+        https: protocol === "https:"
+
+      })
+      client = createXHRClient(MapDThrift, connection)
+    }
   }
+
+  console.log("returning client and connection")
   return { client, connection }
 }
 
@@ -237,6 +261,7 @@ export class DbCon {
             console.error(' this where the error is thrown ')
             console.error(options.query, "\n", error)
           }
+          console.error("Error with query:", options.query)
           throw error
         })
         .then((result) => {
@@ -287,24 +312,15 @@ export class DbCon {
 
   // ** Method wrappers **
 
-  handleErrors = (method) => (...args) => {
-    console.error('this the error handling wrapper')
-    console.log('args', args)
-    console.log('method', method)
+  handleErrors = (method) => (...args) =>
+    method.apply(this, args).catch((error) => {
 
-    let a;
+      console.error('handleErrors', error)
 
-    try {
-      a = method.apply(this, args)
-    }
-    catch (error) {
       this.events.emit(this.EVENT_NAMES.ERROR, error)
       console.error('this the uncaught error')
 
-      a = error.error_msg
-    }
-    return a
-  }
+    })
 
   // for backward compatibility
   callbackify = (method, arity) => (...args) => {
@@ -497,6 +513,8 @@ export class DbCon {
 
   // Track pending requests by client
   addPendingRequest = (clientIdx, requestId, promise) => {
+    console.log('Adding pending request for clientIdx:', clientIdx, 'requestId:', requestId);
+
     if (this._pendingRequests[clientIdx]) {
       this._pendingRequests[clientIdx][requestId] = promise
     } else {
@@ -506,6 +524,7 @@ export class DbCon {
 
   // Reject all pending requests for a given client
   rejectPendingRequests = (clientIdx, reason) => {
+    console.log('Rejecting pending requests for clientIdx:', clientIdx, 'reason:', reason);
     Object.values(this._pendingRequests[clientIdx] || {}).forEach(
       ({ reject }) => {
         reject(reason)
@@ -557,6 +576,7 @@ export class DbCon {
     const transportUrls = this.getEndpoints()
     const clients = []
     const connections = []
+    console.log('before the for loop')
 
     for (let h = 0; h < hostLength; h++) {
       const { client, connection } = buildClient(
@@ -566,6 +586,7 @@ export class DbCon {
       clients.push(client)
       connections.push(connection)
     }
+    console.log('after the for loop')
     this._client = clients
     this._connections = connections
     this._numConnections = this._client.length
@@ -646,20 +667,27 @@ export class DbCon {
 
     let clients = []
     this.initClients()
+    console.log('after initClients in connectAsync')
     clients = this._client
 
     // Reset the client property, so we can add only the ones that we can connect to below
     this._client = []
     return Promise.allSettled(
-      clients.map((client, h) =>
-        this.wrapTimeout(
+      clients.map((client, h) => {
+        // Log user and password for each connection attempt
+        console.log(`Connecting with user: ${this._user[h]}, password: ${this._password[h]}, db: ${this._dbName[h]}`)
+        return this.wrapTimeout(
           client.connect(this._user[h], this._password[h], this._dbName[h]),
           this._connectionTimeout
         ).then((sessionId) => {
+
+          console.log(`Connected to server ${this._host[h]}:${this._port[h]} with sessionId: ${sessionId}`)
+
           return { client, sessionId, connection: this._connections[h] }
         })
-      )
+      })
     ).then((results) => {
+
       this._connections = []
       results.forEach(({ status, value }, index) => {
         if (status === "fulfilled") {
@@ -733,6 +761,7 @@ export class DbCon {
    * con.disconnect()
    */
   disconnectAsync = this.handleErrors(() => {
+    console.log('[HeavyDB] disconnectAsync called');
     return Promise.all(
       this._client.map((client, c) =>
         client.disconnect(this._sessionId[c]).catch((error) => {
@@ -783,7 +812,10 @@ export class DbCon {
    * // }]
    */
   getStatusAsync = this.handleErrors(
-    this.wrapThrift("get_status", this.overSingleClient, (args) => args)
+    (() => {
+      console.log('[HeavyDB] getStatusAsync called');
+      return this.wrapThrift("get_status", this.overSingleClient, (args) => args)();
+    })
   )
 
   /**
@@ -843,7 +875,10 @@ export class DbCon {
    * }
    */
   getHardwareInfoAsync = this.handleErrors(
-    this.wrapThrift("get_hardware_info", this.overSingleClient, (args) => args)
+    (() => {
+      console.log('[HeavyDB] getHardwareInfoAsync called');
+      return this.wrapThrift("get_hardware_info", this.overSingleClient, (args) => args)();
+    })
   )
 
   /**
@@ -931,7 +966,10 @@ export class DbCon {
    * con.getUsersAsync().then(res => console.log(res))
    */
   getUsersAsync = this.handleErrors(
-    this.wrapThrift("get_users", this.overSingleClient, (args) => args)
+    (() => {
+      console.log('[HeavyDB] getUsersAsync called');
+      return this.wrapThrift("get_users", this.overSingleClient, (args) => args)();
+    })
   )
 
   importTableStatusAsync = this.handleErrors(
@@ -963,7 +1001,10 @@ export class DbCon {
    * con.getDashboardsAsync().then(res => console.log(res))
    */
   getDashboardsAsync = this.handleErrors(
-    this.wrapThrift("get_dashboards", this.overSingleClient, (args) => args)
+    (() => {
+      console.log('[HeavyDB] getDashboardsAsync called');
+      return this.wrapThrift("get_dashboards", this.overSingleClient, (args) => args)();
+    })
   )
 
   /**
@@ -976,7 +1017,10 @@ export class DbCon {
    * con.getDashboardAsync().then(res => console.log(res))
    */
   getDashboardAsync = this.handleErrors(
-    this.wrapThrift("get_dashboard", this.overSingleClient, (args) => args)
+    ((dashboardId) => {
+      console.log('[HeavyDB] getDashboardAsync called with dashboardId:', dashboardId);
+      return this.wrapThrift("get_dashboard", this.overSingleClient, (args) => args)(dashboardId);
+    })
   )
 
   /**
@@ -992,7 +1036,10 @@ export class DbCon {
    * con.createDashboardAsync('newSave', 'dashboardstateBase64', null, 'metaData').then(res => console.log(res))
    */
   createDashboardAsync = this.handleErrors(
-    this.wrapThrift("create_dashboard", this.overAllClients, (args) => args)
+    ((...args) => {
+      console.log('[HeavyDB] createDashboardAsync called with args:', args);
+      return this.wrapThrift("create_dashboard", this.overAllClients, (args) => args)(...args);
+    })
   )
 
   /**
@@ -1323,6 +1370,7 @@ export class DbCon {
    *
    */
   detectColumnTypesAsync = this.handleErrors((filename, copyParams) => {
+    console.log('[HeavyDB] detectColumnTypesAsync called with filename:', filename);
     const detectColumnTypes = this.wrapThrift(
       "detect_column_types",
       this.overSingleClient,
@@ -1348,6 +1396,9 @@ export class DbCon {
    * con.query(query, options).then((result) => console.log(result));
    */
   queryAsync = this.handleErrors((query, options) => {
+    console.log('[HeavyDB] queryAsync called with query:', query, 'options:', options);
+    console.log('in queryAsync, query:', query, 'options:', options)
+
     let columnarResults = true
     let eliminateNullRows = false
     let queryId = null
@@ -1433,6 +1484,7 @@ export class DbCon {
   query = this.callbackify("queryAsync", 2)
 
   queryDFAsync = this.handleErrors((query, options) => {
+    console.log('[HeavyDB] queryDFAsync called with query:', query, 'options:', options);
     const deviceId = 0
     const limit = -1
 
@@ -1491,6 +1543,7 @@ export class DbCon {
    *
    */
   validateQuery = this.handleErrors((query) => {
+    console.log('[HeavyDB] validateQuery called with query:', query);
     const sqlValidate = this.wrapThrift(
       "sql_validate",
       this.overSingleClient,
@@ -1520,6 +1573,7 @@ export class DbCon {
    *  //  ...]
    */
   getTablesAsync = this.handleErrors(() => {
+    console.log('[HeavyDB] getTablesAsync called');
     const getTables = this.wrapThrift(
       "get_tables",
       this.overSingleClient,
@@ -1570,6 +1624,7 @@ export class DbCon {
    *  ...]
    */
   getTablesWithMetaAsync = this.handleErrors(() => {
+    console.log('[HeavyDB] getTablesWithMetaAsync called');
     const getTablesMeta = this.wrapThrift(
       "get_tables_meta",
       this.overSingleClient,
@@ -1698,11 +1753,14 @@ export class DbCon {
    *
    */
   getCompletionHintsAsync = this.handleErrors(
-    this.wrapThrift(
-      "get_completion_hints",
-      this.overSingleClient,
-      ([queryString, { cursor }]) => [queryString, cursor]
-    )
+    ((...args) => {
+      console.log('[HeavyDB] getCompletionHintsAsync called with args:', args);
+      return this.wrapThrift(
+        "get_completion_hints",
+        this.overSingleClient,
+        ([queryString, { cursor }]) => [queryString, cursor]
+      )(...args);
+    })
   )
 
   /**
@@ -1809,6 +1867,7 @@ export class DbCon {
    * }, ...]
    */
   getFieldsAsync = this.handleErrors((tableName) => {
+    console.log('[HeavyDB] getFieldsAsync called with tableName:', tableName);
     const getTableDetails = this.wrapThrift(
       "get_table_details",
       this.overSingleClient,
@@ -1888,15 +1947,18 @@ export class DbCon {
    * @param {TColumnType[]} headers A collection of metadata related to the table headers.
    */
   importTableAsync = this.handleErrors(
-    this.wrapThrift(
-      "import_table",
-      this.overAllClients,
-      ([tableName, fileName, copyParams]) => [
-        tableName,
-        fileName,
-        helpers.convertObjectToThriftCopyParams(copyParams)
-      ]
-    )
+    ((...args) => {
+      console.log('[HeavyDB] importTableAsync called with args:', args);
+      return this.wrapThrift(
+        "import_table",
+        this.overAllClients,
+        ([tableName, fileName, copyParams]) => [
+          tableName,
+          fileName,
+          helpers.convertObjectToThriftCopyParams(copyParams)
+        ]
+      )(...args);
+    })
   )
 
   /**
@@ -2408,6 +2470,8 @@ export class DbCon {
   }
 
   isTimeoutError(result) {
+    console.error('isTimeoutError', result)
+
     return (
       result instanceof TDBException &&
       (String(result.error_msg).includes("Session not valid") ||
