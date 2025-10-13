@@ -1,7 +1,7 @@
 const path = require("path")
 
 module.exports = {
-  entry: ["./src/heavy-con-es6.js"],
+  entry: ["./src/index.js"],
   module: {
     rules: [
       {

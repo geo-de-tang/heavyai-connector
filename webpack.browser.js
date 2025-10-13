@@ -2,7 +2,7 @@ const path = require("path")
 const webpack = require("webpack")
 
 module.exports = {
-  entry: ["./src/heavy-con-es6.js"],
+  entry: ["./src/index.js"],
   plugins: [
     new webpack.ProgressPlugin(),
     new webpack.ProvidePlugin({
